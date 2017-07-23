@@ -3,34 +3,34 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
 entity i2c_master is
-    Port ( Address : in  STD_LOGIC_VECTOR (0 to 6);
-           RW : in  STD_LOGIC;
-           Rst: in STD_LOGIC;
-           Start : in  STD_LOGIC;
-           DataInput : in  STD_LOGIC_VECTOR (0 to 7);
-           ConTrans : in  STD_LOGIC; -- Continue transmission signal need to be set within 2,5ns after dataSent
-           Clk : in  STD_LOGIC;
-           DataSent : out  STD_LOGIC;
-           SDAin : in  STD_LOGIC;
-           SDAout : out STD_LOGIC;
-           SCLin : in  STD_LOGIC;
-           SCLout : out  STD_LOGIC;
-			  Busy : out  STD_LOGIC;
-           NAck : out  STD_LOGIC;
-		     DataOutput : out STD_LOGIC_VECTOR (0 to 7));
+   Port (Address : in  STD_LOGIC_VECTOR (0 to 6);
+         RW : in  STD_LOGIC;
+         Rst: in STD_LOGIC;
+         Start : in  STD_LOGIC;
+         DataInput : in  STD_LOGIC_VECTOR (0 to 7);
+         ConTrans : in  STD_LOGIC; -- Continue transmission signal need to be set within 2,5ns after dataSent
+         Clk : in  STD_LOGIC;
+         DataSent : out  STD_LOGIC;
+         SDAin : in  STD_LOGIC;
+         SDAout : out STD_LOGIC;
+         SCLin : in  STD_LOGIC;
+         SCLout : out  STD_LOGIC;
+         Busy : out  STD_LOGIC;
+         NAck : out  STD_LOGIC;
+         DataOutput : out STD_LOGIC_VECTOR (0 to 7));
 end i2c_master;
 
 architecture Behavioral of i2c_master is
 
-  type stateType is (idle, startTrans, addrTrans, trans, rcvTrans, ack, rcvAck,
+   type stateType is (idle, startTrans, addrTrans, trans, rcvTrans, ack, rcvAck,
                      stopTrans);
-  signal state, nextState : stateType;
-  signal clkCount: UNSIGNED(6 downto 0) := "0000000";
-  signal dataCount: INTEGER RANGE -1 TO 7 := -1;
-  signal CE, LaRW : STD_LOGIC := '0';
-  signal LaAddress : STD_LOGIC_VECTOR (0 to 6);
-  signal LaDataInput : STD_LOGIC_VECTOR (0 to 7);
-  signal DataRecieved : STD_LOGIC_VECTOR (7 downto 0);
+   signal state, nextState : stateType;
+   signal clkCount: UNSIGNED(6 downto 0) := "0000000";
+   signal dataCount: INTEGER RANGE -1 TO 7 := -1;
+   signal CE, LaRW : STD_LOGIC := '0';
+   signal LaAddress : STD_LOGIC_VECTOR (0 to 6);
+   signal LaDataInput : STD_LOGIC_VECTOR (0 to 7);
+   signal DataRecieved : STD_LOGIC_VECTOR (7 downto 0);
 
 begin
 --------------------------------------------------------------------------------
@@ -38,13 +38,13 @@ begin
 --------------------------------------------------------------------------------
 Clock: process(Clk)
 begin
-	if rising_edge(Clk) then
-		if Rst = '1' then
-			state <= idle;
-		else
-			state <= nextState;
-		end if;
-	end if;
+   if rising_edge(Clk) then
+      if Rst = '1' then
+         state <= idle;
+      else
+         state <= nextState;
+      end if;
+   end if;
 end process Clock;
 --------------------------------------------------------------------------------
 -- State Machine process
