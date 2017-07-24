@@ -3,34 +3,44 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
 entity i2c_master is
-   Port (Address : in  STD_LOGIC_VECTOR (0 to 6);
-         RW : in  STD_LOGIC;
-         Rst: in STD_LOGIC;
-         Start : in  STD_LOGIC;
-         DataInput : in  STD_LOGIC_VECTOR (0 to 7);
-         ConTrans : in  STD_LOGIC; -- Continue transmission signal need to be set within 2,5ns after dataSent
-         Clk : in  STD_LOGIC;
-         DataSent : out  STD_LOGIC;
-         SDAin : in  STD_LOGIC;
-         SDAout : out STD_LOGIC;
-         SCLin : in  STD_LOGIC;
-         SCLout : out  STD_LOGIC;
-         Busy : out  STD_LOGIC;
-         NAck : out  STD_LOGIC;
-         DataOutput : out STD_LOGIC_VECTOR (0 to 7));
+   Port (Address     : in  STD_LOGIC_VECTOR (0 to 6);
+         RW          : in  STD_LOGIC;
+         Rst         : in  STD_LOGIC;
+         Start       : in  STD_LOGIC;
+         DataInput   : in  STD_LOGIC_VECTOR (0 to 7);
+         ConTrans    : in  STD_LOGIC; -- Continue transmission signal need to be set within 2,5ns after dataSent
+         Clk         : in  STD_LOGIC;
+         DataSent    : out STD_LOGIC;
+         SDAin       : in  STD_LOGIC;
+         SDAout      : out STD_LOGIC;
+         SCLin       : in  STD_LOGIC;
+         SCLout      : out STD_LOGIC;
+         Busy        : out STD_LOGIC;
+         NAck        : out STD_LOGIC;
+         DataOutput  : out STD_LOGIC_VECTOR (0 to 7);
+         FifoPush    : in  STD_LOGIC;
+         FifoPop     : in  STD_LOGIC
+        );
+
 end i2c_master;
 
 architecture Behavioral of i2c_master is
 
    type stateType is (idle, startTrans, addrTrans, trans, rcvTrans, ack, rcvAck,
                      stopTrans);
-   signal state, nextState : stateType;
-   signal clkCount: UNSIGNED(6 downto 0) := "0000000";
-   signal dataCount: INTEGER RANGE -1 TO 7 := -1;
-   signal CE, LaRW : STD_LOGIC := '0';
-   signal LaAddress : STD_LOGIC_VECTOR (0 to 6);
-   signal LaDataInput : STD_LOGIC_VECTOR (0 to 7);
-   signal DataRecieved : STD_LOGIC_VECTOR (7 downto 0);
+   type fifoArray is array (0 to 15) of STD_LOGIC_VECTOR (0 to 7);
+
+   signal fifoMemory          : fifoArray;
+   signal fifoHead, fifoTail  : INTEGER RANGE 0 TO 15 := 0;
+   signal fifoFull            : STD_LOGIC := '0';
+   signal fifoEmpty           : STD_LOGIC := '1';
+   signal state, nextState    : stateType;
+   signal clkCount            : UNSIGNED (6 downto 0) := "0000000";
+   signal dataCount           : INTEGER RANGE -1 TO 7 := -1;
+   signal CE, LaRW            : STD_LOGIC := '0';
+   signal LaAddress           : STD_LOGIC_VECTOR (0 to 6);
+   signal LaDataInput         : STD_LOGIC_VECTOR (0 to 7);
+   signal DataRecieved        : STD_LOGIC_VECTOR (7 downto 0);
 
 begin
 --------------------------------------------------------------------------------
@@ -108,6 +118,24 @@ begin
    end case;
 end process FSM;
 --------------------------------------------------------------------------------
+-- Fifo queue process
+--------------------------------------------------------------------------------
+FifoQueue: process(state, Clk)
+begin
+   if rising_edge(Clk) then
+      if Rst = '1' then
+         fifoHead <= 0;
+         fifoTail <= 0;
+         fifoEmpty <= '1';
+         fifoFull <= '0';
+      else
+         if LaRW = '0' then
+            
+         end if;
+      end if;
+   end if;
+end process FifoQueue;
+--------------------------------------------------------------------------------
 -- SDAout signal driver
 --------------------------------------------------------------------------------
 SdaDriver: process(state, clkCount, Clk, dataCount)
@@ -120,7 +148,7 @@ begin
          SDAout <= '0';
       end if;
       if state = addrTrans or state = trans then
-         if clkCount = "0100011"	then
+         if clkCount = "0100011" then
             SDAout <= LaDataInput(dataCount);
          end if;
       end if;
@@ -128,20 +156,20 @@ begin
          SDAout <= '1';
       end if;
       if state = ack then
-         if clkCount = "0001100"	then
+         if clkCount = "0001100" then
             SDAout <= '1';
          end if;
       end if;
       if state = rcvAck then
-         if clkCount = "0001100"	then
+         if clkCount = "0001100" then
             SDAout <= '0';
          end if;
       end if;
       if state = stopTrans then
-         if clkCount = "0000000"	then
+         if clkCount = "0000000" then
             SDAout <= '0';
          end if;
-         if clkCount = "1111100"	then
+         if clkCount = "1111100" then
             SDAout <= '1';
          end if;
       end if;
@@ -154,7 +182,7 @@ SdaInDriver: process(state, clkCount, Clk, dataCount)
 begin
    if rising_edge(Clk) then
       if state = rcvTrans then
-         if clkCount = "1100000"	then
+         if clkCount = "1100000" then
             DataRecieved(dataCount) <= SDAin;
          end if;
       end if;
@@ -175,7 +203,7 @@ begin
          end if;
       end if;
       if state = trans or state = addrTrans or state = rcvTrans
-            or state = ack  or state = rcvAck then
+            or state = ack or state = rcvAck then
          if clkCount = "1001000" then
             SCLout <= '1';
          end if;
