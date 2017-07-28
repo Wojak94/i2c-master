@@ -18,8 +18,10 @@ entity i2c_master is
          Busy        : out STD_LOGIC;
          NAck        : out STD_LOGIC;
          DataOutput  : out STD_LOGIC_VECTOR (0 to 7);
-         FifoPush    : in  STD_LOGIC;
-         FifoPop     : in  STD_LOGIC
+         PushFifo    : in  STD_LOGIC;
+         PopFifo     : in  STD_LOGIC;
+         EmptyFifo   : out STD_LOGIC;
+         FullFifo    : out STD_LOGIC
         );
 
 end i2c_master;
@@ -31,9 +33,10 @@ architecture Behavioral of i2c_master is
    type fifoArray is array (0 to 15) of STD_LOGIC_VECTOR (0 to 7);
 
    signal fifoMemory          : fifoArray;
+   signal fifoLooped          : STD_LOGIC := '0';
    signal fifoHead, fifoTail  : INTEGER RANGE 0 TO 15 := 0;
-   signal fifoFull            : STD_LOGIC := '0';
    signal fifoEmpty           : STD_LOGIC := '1';
+   signal fifoFull            : STD_LOGIC := '0';
    signal state, nextState    : stateType;
    signal clkCount            : UNSIGNED (6 downto 0) := "0000000";
    signal dataCount           : INTEGER RANGE -1 TO 7 := -1;
@@ -102,6 +105,9 @@ begin
                when others =>
                   nextState <= stopTrans;
             end case;
+            if LaRW = '0' and fifoEmpty = '1' then
+               nextState <= stopTrans;
+            end if;
          end if;
       when rcvAck =>
          if ClkCount = "1111100" then
@@ -120,7 +126,7 @@ end process FSM;
 --------------------------------------------------------------------------------
 -- Fifo queue process
 --------------------------------------------------------------------------------
-FifoQueue: process(state, Clk)
+FifoQueue: process(state, Clk, clkCount)
 begin
    if rising_edge(Clk) then
       if Rst = '1' then
@@ -128,9 +134,68 @@ begin
          fifoTail <= 0;
          fifoEmpty <= '1';
          fifoFull <= '0';
+         fifoLooped <= '0';
       else
+         -- Outgoing transmission
          if LaRW = '0' then
-            
+            if PushFifo = '1' and fifoFull = '0' then
+               fifoMemory(fifoHead) <= DataInput;
+               if fifoHead = 15 then
+                  fifoHead <= 0;
+                  fifoLooped <= '1';
+               else
+                  fifoHead <= fifoHead + 1;
+               end if;
+            end if;
+            if state = trans then
+               if clkCount = "1111100" then
+                  if fifoTail = 15 then
+                     fifoTail <= 0;
+                     fifoLooped <= '0';
+                  else
+                     fifoTail <= fifoTail + 1;
+                  end if;
+               end if;
+            end if;
+         end if;
+         -- Incomming transmission
+         if LaRW = '1' then
+            if PopFifo = '1' and fifoEmpty = '0' then
+               DataOutput <= fifoMemory(fifoTail);
+               if fifoTail = 15 then
+                  fifoTail <= 0;
+                  fifoLooped <= '0';
+               else
+                  fifoTail <= fifoTail + 1;
+               end if;
+            end if;
+            if state = rcvTrans then
+               if clkCount = "1111100" then
+                  if fifoHead = 15 then
+                     fifoHead <= 0;
+                     fifoLooped <= '1';
+                  else
+                     fifoHead <= fifoHead + 1;
+                  end if;
+               end if;
+            end if;
+         end if;
+         -- Update empty/full status
+         if fifoTail = fifoHead then
+            if fifoLooped = '1' then
+               fifoFull <= '1';
+               FullFifo <= '1';
+            else
+               fifoEmpty <= '1';
+               EmptyFifo <= '1';
+            end if;
+         else
+            -- Internal signals
+            fifoEmpty <= '0';
+            fifoFull <= '0';
+            -- External signals
+            EmptyFifo <= '0';
+            FullFifo <= '0';
          end if;
       end if;
    end if;
@@ -147,9 +212,14 @@ begin
       if state = startTrans then
          SDAout <= '0';
       end if;
-      if state = addrTrans or state = trans then
+      if state = addrTrans then
          if clkCount = "0100011" then
             SDAout <= LaDataInput(dataCount);
+         end if;
+      end if;
+      if state = trans then
+         if clkCount = "0100011" then
+            SDAout <= fifoMemory(fifoTail)(dataCount);
          end if;
       end if;
       if state = rcvTrans then
@@ -162,7 +232,11 @@ begin
       end if;
       if state = rcvAck then
          if clkCount = "0001100" then
-            SDAout <= '0';
+            if fifoFull = '1' or ConTrans = '0' then
+               SDAout <= '1';
+            else
+               SDAout <= '0';
+            end if;
          end if;
       end if;
       if state = stopTrans then
@@ -183,7 +257,7 @@ begin
    if rising_edge(Clk) then
       if state = rcvTrans then
          if clkCount = "1100000" then
-            DataRecieved(dataCount) <= SDAin;
+            fifoMemory(fifoHead)(dataCount) <= SDAin;
          end if;
       end if;
    end if;
@@ -238,15 +312,15 @@ end process WaitAck;
 --------------------------------------------------------------------------------
 -- Process for presenting recieved data
 --------------------------------------------------------------------------------
-DataOut: process(Clk, state, clkCount)
-begin
-   if rising_edge(Clk) then
-      if state = rcvAck and clkCount = "0000000" then
-         DataOutput <= DataRecieved;
-      end if;
-   end if;
-end process DataOut;
---------------------------------------------------------------------------------
+-- DataOut: process(Clk, state, clkCount)
+-- begin
+--    if rising_edge(Clk) then
+--       if state = rcvAck and clkCount = "0000000" then
+--          DataOutput <= DataRecieved;
+--       end if;
+--    end if;
+-- end process DataOut;
+-- --------------------------------------------------------------------------------
 -- Latch for Input Data process
 --------------------------------------------------------------------------------
 InputLatch: process(Clk, Start, ConTrans, state)
@@ -256,9 +330,9 @@ begin
       LaRW <= RW;
       LaDataInput <= LaAddress & LaRW;
    end if;
-   if ConTrans = '1' and state = ack then
-      LaDataInput <= DataInput;
-   end if;
+   -- if ConTrans = '1' and state = ack then
+   --    LaDataInput <= DataInput;
+   -- end if;
 end process InputLatch;
 --------------------------------------------------------------------------------
 -- Counter of bits sent
