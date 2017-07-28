@@ -43,7 +43,7 @@ architecture Behavioral of i2c_master is
    signal CE, LaRW            : STD_LOGIC := '0';
    signal LaAddress           : STD_LOGIC_VECTOR (0 to 6);
    signal LaDataInput         : STD_LOGIC_VECTOR (0 to 7);
-   signal DataRecieved        : STD_LOGIC_VECTOR (7 downto 0);
+   signal dataRecieved        : STD_LOGIC_VECTOR (7 downto 0);
 
 begin
 --------------------------------------------------------------------------------
@@ -62,7 +62,7 @@ end process Clock;
 --------------------------------------------------------------------------------
 -- State Machine process
 --------------------------------------------------------------------------------
-FSM: process(state, clkCount, Start, LaRW, dataCount, SDAin, ConTrans)
+FSM: process(state, clkCount, Start, LaRW, dataCount, SDAin, ConTrans, fifoEmpty, fifoFull)
 begin
    nextState <= state;
    case state is
@@ -111,9 +111,9 @@ begin
          end if;
       when rcvAck =>
          if ClkCount = "1111100" then
-            if ConTrans = '1' then
+            if fifoFull = '0' and ConTrans = '1' then
                nextState <= rcvTrans;
-            elsif ConTrans = '0' then
+            elsif fifoFull = '1' or ConTrans = '0' then
                nextState <= stopTrans;
             end if;
          end if;
@@ -148,7 +148,7 @@ begin
                end if;
             end if;
             if state = trans then
-               if clkCount = "1111100" then
+               if clkCount = "1111100" and dataCount = 7 then
                   if fifoTail = 15 then
                      fifoTail <= 0;
                      fifoLooped <= '0';
@@ -170,7 +170,8 @@ begin
                end if;
             end if;
             if state = rcvTrans then
-               if clkCount = "1111100" then
+               if clkCount = "1111100" and dataCount = 7 then
+                  fifoMemory(fifoHead) <= dataRecieved;
                   if fifoHead = 15 then
                      fifoHead <= 0;
                      fifoLooped <= '1';
@@ -257,7 +258,7 @@ begin
    if rising_edge(Clk) then
       if state = rcvTrans then
          if clkCount = "1100000" then
-            fifoMemory(fifoHead)(dataCount) <= SDAin;
+            dataRecieved(7 - dataCount) <= SDAin;
          end if;
       end if;
    end if;
@@ -316,14 +317,14 @@ end process WaitAck;
 -- begin
 --    if rising_edge(Clk) then
 --       if state = rcvAck and clkCount = "0000000" then
---          DataOutput <= DataRecieved;
+--          DataOutput <= dataRecieved;
 --       end if;
 --    end if;
 -- end process DataOut;
 -- --------------------------------------------------------------------------------
 -- Latch for Input Data process
 --------------------------------------------------------------------------------
-InputLatch: process(Clk, Start, ConTrans, state)
+InputLatch: process(Clk, Start, ConTrans, state, Address, RW)
 begin
    if Start = '1' and state = idle then
       LaAddress <= Address;
