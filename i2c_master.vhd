@@ -29,7 +29,7 @@ end i2c_master;
 architecture Behavioral of i2c_master is
 
    type stateType is (idle, startTrans, addrTrans, trans, rcvTrans, ack, rcvAck,
-                     stopTrans);
+                      stopTrans);
    type fifoArray is array (0 to 15) of STD_LOGIC_VECTOR (0 to 7);
 
    signal fifoMemory          : fifoArray;
@@ -40,9 +40,9 @@ architecture Behavioral of i2c_master is
    signal state, nextState    : stateType;
    signal clkCount            : UNSIGNED (6 downto 0) := "0000000";
    signal dataCount           : INTEGER RANGE -1 TO 7 := -1;
-   signal CE, LaRW            : STD_LOGIC := '0';
-   signal LaAddress           : STD_LOGIC_VECTOR (0 to 6);
-   signal LaDataInput         : STD_LOGIC_VECTOR (0 to 7);
+   signal CE                  : STD_LOGIC := '0';
+   signal transDirection      : STD_LOGIC;
+   signal addressByte         : STD_LOGIC_VECTOR (0 to 7);
    signal dataRecieved        : STD_LOGIC_VECTOR (7 downto 0);
 
 begin
@@ -62,7 +62,8 @@ end process Clock;
 --------------------------------------------------------------------------------
 -- State Machine process
 --------------------------------------------------------------------------------
-FSM: process(state, clkCount, Start, LaRW, dataCount, SDAin, ConTrans, fifoEmpty, fifoFull)
+FSM: process(state, clkCount, Start, transDirection, dataCount, SDAin, ConTrans,
+             fifoEmpty, fifoFull)
 begin
    nextState <= state;
    case state is
@@ -92,9 +93,9 @@ begin
          if clkCount = "1111100" then
             case SDAin is
                when '0' => -- data ACK by slave
-                  if ConTrans = '1' and LaRW = '0' then
+                  if ConTrans = '1' and transDirection = '0' then
                      nextState <= trans;
-                  elsif ConTrans = '1' and LaRW = '1' then
+                  elsif ConTrans = '1' and transDirection = '1' then
                      nextState <= rcvTrans;
                   elsif ConTrans = '0' then
                      nextState <= stopTrans;
@@ -105,7 +106,7 @@ begin
                when others =>
                   nextState <= stopTrans;
             end case;
-            if LaRW = '0' and fifoEmpty = '1' then
+            if transDirection = '0' and fifoEmpty = '1' then
                nextState <= stopTrans;
             end if;
          end if;
@@ -137,7 +138,7 @@ begin
          fifoLooped <= '0';
       else
          -- Outgoing transmission
-         if LaRW = '0' then
+         if transDirection = '0' then
             if PushFifo = '1' and fifoFull = '0' then
                fifoMemory(fifoHead) <= DataInput;
                if fifoHead = 15 then
@@ -159,7 +160,7 @@ begin
             end if;
          end if;
          -- Incomming transmission
-         if LaRW = '1' then
+         if transDirection = '1' then
             if PopFifo = '1' and fifoEmpty = '0' then
                DataOutput <= fifoMemory(fifoTail);
                if fifoTail = 15 then
@@ -215,7 +216,7 @@ begin
       end if;
       if state = addrTrans then
          if clkCount = "0100011" then
-            SDAout <= LaDataInput(dataCount);
+            SDAout <= addressByte(dataCount);
          end if;
       end if;
       if state = trans then
@@ -310,30 +311,17 @@ begin
       end if;
    end if;
 end process WaitAck;
---------------------------------------------------------------------------------
--- Process for presenting recieved data
---------------------------------------------------------------------------------
--- DataOut: process(Clk, state, clkCount)
--- begin
---    if rising_edge(Clk) then
---       if state = rcvAck and clkCount = "0000000" then
---          DataOutput <= dataRecieved;
---       end if;
---    end if;
--- end process DataOut;
 -- --------------------------------------------------------------------------------
 -- Latch for Input Data process
 --------------------------------------------------------------------------------
-InputLatch: process(Clk, Start, ConTrans, state, Address, RW)
+InputLatch: process(Clk, Start, state, Address, RW)
 begin
-   if Start = '1' and state = idle then
-      LaAddress <= Address;
-      LaRW <= RW;
-      LaDataInput <= LaAddress & LaRW;
+   if rising_edge(Clk) then
+      if Start = '1' and state = idle then
+         transDirection <= RW;
+         addressByte <= Address & RW;
+      end if;
    end if;
-   -- if ConTrans = '1' and state = ack then
-   --    LaDataInput <= DataInput;
-   -- end if;
 end process InputLatch;
 --------------------------------------------------------------------------------
 -- Counter of bits sent
