@@ -23,7 +23,6 @@ entity i2c_master is
          EmptyFifo   : out STD_LOGIC;
          FullFifo    : out STD_LOGIC
         );
-
 end i2c_master;
 
 architecture Behavioral of i2c_master is
