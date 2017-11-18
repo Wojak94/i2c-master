@@ -3,25 +3,29 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
 entity i2c_master is
-   Port (Address     : in  STD_LOGIC_VECTOR (0 to 6);
-         RW          : in  STD_LOGIC;
-         Rst         : in  STD_LOGIC;
-         Start       : in  STD_LOGIC;
-         DataInput   : in  STD_LOGIC_VECTOR (0 to 7);
-         ConTrans    : in  STD_LOGIC; -- Continue transmission signal need to be set within 2,5ns after dataSent
-         Clk         : in  STD_LOGIC;
-         DataSent    : out STD_LOGIC;
-         SDAin       : in  STD_LOGIC;
-         SDAout      : out STD_LOGIC;
-         SCLin       : in  STD_LOGIC;
-         SCLout      : out STD_LOGIC;
-         Busy        : out STD_LOGIC;
-         NAck        : out STD_LOGIC;
-         DataOutput  : out STD_LOGIC_VECTOR (0 to 7);
-         PushFifo    : in  STD_LOGIC;
-         PopFifo     : in  STD_LOGIC;
-         EmptyFifo   : out STD_LOGIC;
-         FullFifo    : out STD_LOGIC
+   Port (Address        : in  STD_LOGIC_VECTOR (0 to 6);
+         RW             : in  STD_LOGIC;
+         Rst            : in  STD_LOGIC;
+         Start          : in  STD_LOGIC;
+         DataInput      : in  STD_LOGIC_VECTOR (0 to 7);
+         DataOutput     : out STD_LOGIC_VECTOR (0 to 7);
+         ConTrans       : in  STD_LOGIC; -- Continue transmission signal need to be set within 2,5ns after dataSent
+         Clk            : in  STD_LOGIC;
+         DataSent       : out STD_LOGIC;
+         SDAin          : in  STD_LOGIC;
+         SDAout         : out STD_LOGIC;
+         SCLin          : in  STD_LOGIC;
+         SCLout         : out STD_LOGIC;
+         Busy           : out STD_LOGIC;
+         NAck           : out STD_LOGIC;
+         DataInputFifo  : in  STD_LOGIC_VECTOR (0 to 7);
+         DataOutputFifo : out STD_LOGIC_VECTOR (0 to 7);
+         PushFifo       : in  STD_LOGIC;
+         PopFifo        : in  STD_LOGIC;
+         PushInternal   : out STD_LOGIC;
+         PopInternal    : out STD_LOGIC;
+         EmptyFifo      : in  STD_LOGIC;
+         FullFifo       : in  STD_LOGIC
         );
 end i2c_master;
 
@@ -29,17 +33,9 @@ architecture Behavioral of i2c_master is
 
    type stateType is (idle, startTrans, addrTrans, trans, rcvTrans, ack, rcvAck,
                       stopTrans);
-   type fifoArray is array (0 to 15) of STD_LOGIC_VECTOR (0 to 7);
-
-   signal fifoMemory          : fifoArray;
-   signal fifoLooped          : STD_LOGIC := '0';
-   signal fifoHead, fifoTail  : INTEGER RANGE 0 TO 15 := 0;
-   signal fifoEmpty           : STD_LOGIC := '1';
-   signal fifoFull            : STD_LOGIC := '0';
    signal state, nextState    : stateType;
    signal clkCount            : UNSIGNED (6 downto 0) := "0000000";
    signal dataCount           : INTEGER RANGE -1 TO 7 := -1;
-   signal CE                  : STD_LOGIC := '0';
    signal transDirection      : STD_LOGIC;
    signal addressByte         : STD_LOGIC_VECTOR (0 to 7);
    signal dataRecieved        : STD_LOGIC_VECTOR (7 downto 0);
@@ -62,17 +58,15 @@ end process Clock;
 -- State Machine process
 --------------------------------------------------------------------------------
 FSM: process(state, clkCount, Start, transDirection, dataCount, SDAin, ConTrans,
-             fifoEmpty, fifoFull)
+             EmptyFifo, FullFifo)
 begin
    nextState <= state;
    case state is
       when idle =>
-         CE <= '0';
          if Start = '1' then
             nextState <= startTrans;
          end if;
       when startTrans =>
-         CE <= '1';
          if clkCount = "1111100" then
             nextState <= addrTrans;
          end if;
@@ -105,15 +99,15 @@ begin
                when others =>
                   nextState <= stopTrans;
             end case;
-            if transDirection = '0' and fifoEmpty = '1' then
+            if transDirection = '0' and EmptyFifo = '1' then
                nextState <= stopTrans;
             end if;
          end if;
       when rcvAck =>
          if ClkCount = "1111100" then
-            if fifoFull = '0' and ConTrans = '1' then
+            if FullFifo = '0' and ConTrans = '1' then
                nextState <= rcvTrans;
-            elsif fifoFull = '1' or ConTrans = '0' then
+            elsif FullFifo = '1' or ConTrans = '0' then
                nextState <= stopTrans;
             end if;
          end if;
@@ -129,74 +123,31 @@ end process FSM;
 FifoQueue: process(state, Clk, clkCount)
 begin
    if rising_edge(Clk) then
-      if Rst = '1' then
-         fifoHead <= 0;
-         fifoTail <= 0;
-         fifoEmpty <= '1';
-         fifoFull <= '0';
-         fifoLooped <= '0';
-      else
-         -- Outgoing transmission
-         if transDirection = '0' then
-            if PushFifo = '1' and fifoFull = '0' then
-               fifoMemory(fifoHead) <= DataInput;
-               if fifoHead = 15 then
-                  fifoHead <= 0;
-                  fifoLooped <= '1';
-               else
-                  fifoHead <= fifoHead + 1;
-               end if;
-            end if;
-            if state = trans then
-               if clkCount = "1111100" and dataCount = 7 then
-                  if fifoTail = 15 then
-                     fifoTail <= 0;
-                     fifoLooped <= '0';
-                  else
-                     fifoTail <= fifoTail + 1;
-                  end if;
-               end if;
+      PushInternal <= '0';
+      PopInternal <= '0';
+      -- Outgoing transmission
+      if transDirection = '0' or state = idle then
+         if PushFifo = '1' and FullFifo = '0' then
+            DataOutputFifo <= DataInput;
+            PushInternal <= '1';
+         end if;
+         if state = trans then
+            if clkCount = "1111100" and dataCount = 7 then
+              PopInternal <= '1';
             end if;
          end if;
-         -- Incomming transmission
-         if transDirection = '1' then
-            if PopFifo = '1' and fifoEmpty = '0' then
-               DataOutput <= fifoMemory(fifoTail);
-               if fifoTail = 15 then
-                  fifoTail <= 0;
-                  fifoLooped <= '0';
-               else
-                  fifoTail <= fifoTail + 1;
-               end if;
-            end if;
-            if state = rcvTrans then
-               if clkCount = "1111100" and dataCount = 7 then
-                  fifoMemory(fifoHead) <= dataRecieved;
-                  if fifoHead = 15 then
-                     fifoHead <= 0;
-                     fifoLooped <= '1';
-                  else
-                     fifoHead <= fifoHead + 1;
-                  end if;
-               end if;
-            end if;
+      end if;
+      -- Incomming transmission
+      if transDirection = '1' or state = idle then
+         DataOutput <= DataInputFifo;
+         if PopFifo = '1' and EmptyFifo = '0' then
+            PopInternal <= '1';
          end if;
-         -- Update empty/full status
-         if fifoTail = fifoHead then
-            if fifoLooped = '1' then
-               fifoFull <= '1';
-               FullFifo <= '1';
-            else
-               fifoEmpty <= '1';
-               EmptyFifo <= '1';
+         if state = rcvTrans then
+            if clkCount = "1111100" and dataCount = 7 then
+               DataOutputFifo <= dataRecieved;
+               PushInternal <= '1';
             end if;
-         else
-            -- Internal signals
-            fifoEmpty <= '0';
-            fifoFull <= '0';
-            -- External signals
-            EmptyFifo <= '0';
-            FullFifo <= '0';
          end if;
       end if;
    end if;
@@ -220,7 +171,7 @@ begin
       end if;
       if state = trans then
          if clkCount = "0100011" then
-            SDAout <= fifoMemory(fifoTail)(dataCount);
+            SDAout <= DataInputFifo(dataCount);
          end if;
       end if;
       if state = rcvTrans then
@@ -232,8 +183,8 @@ begin
          end if;
       end if;
       if state = rcvAck then
-         if clkCount = "0001100" then
-            if fifoFull = '1' or ConTrans = '0' then
+         if clkCount = "0001100" then --ConTrans must be in '0' for the rest of the rcvAck state
+            if FullFifo = '1' or ConTrans = '0' then
                SDAout <= '1';
             else
                SDAout <= '0';
@@ -340,12 +291,12 @@ end process DataCounter;
 --------------------------------------------------------------------------------
 -- Clock Counter process (0-124 clock ticks)
 --------------------------------------------------------------------------------
-ClockCounter: process(Clk, Rst, CE)
+ClockCounter: process(Clk, Rst, state)
 begin
    if rising_edge(Clk) then
-      if Rst = '1' or CE = '0' then
+      if Rst = '1' or state = idle then
          clkCount <= "0000000";
-      elsif CE = '1' then
+      else
          if clkCount = "1111100" then
             clkCount <= "0000000";
          else
