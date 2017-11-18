@@ -19,6 +19,7 @@
 --------------------------------------------------------------------------------
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
 
 entity bme280_driver is
    Port (Clk        : in  STD_LOGIC;
@@ -26,6 +27,7 @@ entity bme280_driver is
          Rst        : in  STD_LOGIC;
          EmptyFifo  : in  STD_LOGIC;
          FullFifo   : in  STD_LOGIC;
+         DataSent   : in  STD_LOGIC;
          DataInput  : in  STD_LOGIC_VECTOR (0 to 7);
          Start      : out STD_LOGIC;
          ConTrans   : out STD_LOGIC;
@@ -38,22 +40,32 @@ entity bme280_driver is
 end bme280_driver;
 
 architecture Behavioral of bme280_driver is
-   signal address : STD_LOGIC_VECTOR (0 to 6) := "1110110";
-   signal done    : STD_LOGIC := '0';
+   signal address  : STD_LOGIC_VECTOR (0 to 6) := "1110110";
+   signal stateNum : INTEGER RANGE 0 TO 4 := 0;
 
 begin
 
-Test: process(Clk, done, Busy)
+Test: process(Clk, stateNum, Busy, DataSent)
 begin
    if rising_edge(Clk) then
-      if done = '0' and Busy = '0' then
+      if stateNum = 0 and Busy = '0' then
          I2cAddress <= address;
          RW <= '0';
          ConTrans <= '1';
-         DataOutput <= x"FF";
+         DataOutput <= x"F4";
          PushFifo <= '1';
-         done <= '1';
+         stateNum <= stateNum + 1;
          Start <= '1';
+      elsif stateNum = 1 and Busy = '1' then
+         RW <= '1';
+         stateNum <= stateNum + 1;
+      elsif stateNum = 2 and Busy = '0' then
+         Start <= '1';
+         stateNum <= stateNum + 1;
+      elsif stateNum = 3 and DataSent = '1' then
+         stateNum <= stateNum + 1;
+      elsif stateNum = 4 and DataSent = '1' then
+         ConTrans <= '0';
       else
          PushFifo <= '0';
          Start <= '0';
