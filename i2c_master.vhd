@@ -60,6 +60,7 @@ end process Clock;
 FSM: process(state, clkCount, Start, transDirection, dataCount, SDAin, ConTrans,
              EmptyFifo, FullFifo)
 begin
+   NAck <= '0';
    nextState <= state;
    case state is
       when idle =>
